@@ -1,0 +1,8 @@
+node_modules/
+platform-tools/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/captures/
+*.log
+www/css/tailwind.css
