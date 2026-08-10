@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <title>Vintex Guest House — Attendant Dashboard</title>
+
+    <!-- Tailwind CSS: locally compiled via Tailwind CLI (see tailwind.config.js,
+         css/tailwind.input.css, and the "build:css" npm script). Same brand
+         palette + fontFamily mapping as before, now baked in at build time
+         instead of compiled in-browser from a CDN script. -->
+    <link rel="stylesheet" href="css/tailwind.css" />
+
+    <!-- Self-hosted Inter + JetBrains Mono (see css/fonts.css, fonts/) —
+         no runtime request to fonts.googleapis.com / fonts.gstatic.com. -->
+    <link rel="stylesheet" href="css/fonts.css" />
+
+    <link rel="stylesheet" href="style.css" />
+
+    <!-- jsPDF: generates real PDF files entirely in JS (no browser print
+         dialog involved), which is what makes receipts/reports reliable
+         on mobile — see Receipt.js / BookingHistory.js for why.
+         Self-hosted from vendor/ (was cdnjs) so printing doesn't depend
+         on a third-party CDN being reachable at print time. -->
+    <script src="vendor/jspdf.umd.min.js"></script>
+    <script src="vendor/jspdf.plugin.autotable.min.js"></script>
+  </head>
+
+  <body class="bg-gray-950 text-gray-100 font-sans antialiased">
+    <!-- ═══════════════════════════════════════════════════════════
+         LOGIN SCREEN OVERLAY
+         Controlled by js/services/auth.js → initAuthGate()
+         Hidden immediately if a valid session is already active.
+    ═══════════════════════════════════════════════════════════════ -->
+    <div id="login-screen" class="fixed inset-0 z-[100] flex items-center justify-center bg-gray-950 px-4">
+      <div class="w-full max-w-sm">
+        <!-- Card -->
+        <div class="bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl overflow-hidden">
+          <!-- Card header -->
+          <div class="px-8 pt-8 pb-6 text-center border-b border-gray-800">
+            <div
+              class="mx-auto w-14 h-14 rounded-2xl bg-brand-900/60 border border-brand-600/40 flex items-center justify-center mb-5 shadow-lg">
+              <svg class="w-7 h-7 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002
+                     2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </div>
+            <h1 class="text-xl font-bold text-white tracking-tight">Vintex Guest House</h1>
+            <p class="text-xs text-gray-500 mt-1">Property Management &amp; Front Desk System</p>
+          </div>
+
+          <!-- Login form -->
+          <div class="px-8 py-7">
+            <form id="login-form" autocomplete="off" class="space-y-5">
+              <div>
+                <label
+                  for="login-pin-input"
+                  class="block text-xs font-semibold uppercase tracking-widest text-gray-400 mb-2">
+                  Authorization PIN
+                </label>
+                <input
+                  type="password"
+                  id="login-pin-input"
+                  name="pin"
+                  placeholder="Enter your PIN"
+                  required
+                  autocomplete="current-password"
+                  class="w-full bg-gray-950 border border-gray-700 rounded-xl px-4 py-3 text-center text-lg font-mono text-white tracking-widest placeholder-gray-700 placeholder:text-base placeholder:tracking-normal focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors" />
+              </div>
+
+              <!-- Inline error — hidden by default, shown by auth.js on failure -->
+              <div
+                id="login-error-msg"
+                class="hidden flex items-center gap-2 text-xs text-rose-400 font-medium bg-rose-900/20 border border-rose-800/40 rounded-lg px-3 py-2.5">
+                <svg class="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                  <path
+                    fill-rule="evenodd"
+                    d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0
+                       1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                    clip-rule="evenodd" />
+                </svg>
+                Invalid PIN. Access denied.
+              </div>
+
+              <button
+                type="submit"
+                class="w-full bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white font-semibold py-3 px-4 rounded-xl shadow-md transition-colors duration-150 text-sm">
+                Unlock Dashboard
+              </button>
+            </form>
+          </div>
+
+          <!-- Footer note -->
+          <div class="px-8 pb-6 text-center">
+            <p class="text-[11px] text-gray-700">Authorized personnel only. Session expires on tab close.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         APP SHELL — visible after auth gate passes
+    ═══════════════════════════════════════════════════════════════ -->
+    <div id="app" class="flex min-h-screen">
+      <!-- ── SIDEBAR DRAWER OVERLAY (mobile only) ── -->
+      <div
+        id="sidebar-overlay"
+        class="no-print fixed inset-0 z-20 bg-black/60 backdrop-blur-sm hidden opacity-0 transition-opacity duration-300 md:hidden"></div>
+
+      <!-- ── SIDEBAR ── -->
+      <aside
+        id="sidebar"
+        class="no-print w-64 bg-gray-900 border-r border-gray-800 flex flex-col fixed inset-y-0 left-0 z-30 -translate-x-full transition-transform duration-300 ease-out md:translate-x-0">
+        <!-- Logo -->
+        <div class="px-6 py-5 border-b border-gray-800">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+              <div class="w-9 h-9 rounded-lg bg-brand-600 flex items-center justify-center shadow-lg">
+                <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1
+                       1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+              </div>
+              <div>
+                <p class="text-sm font-semibold text-white leading-tight">Vintex</p>
+                <p class="text-xs text-gray-500">Guest House</p>
+              </div>
+            </div>
+
+            <!-- Drawer close button (mobile only) -->
+            <button
+              type="button"
+              id="btn-close-drawer"
+              aria-label="Close menu"
+              class="md:hidden w-8 h-8 flex items-center justify-center rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white border border-gray-700 transition-colors shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 px-3 py-4 space-y-1">
+          <!-- Dashboard -->
+          <button
+            type="button"
+            data-view="dashboard"
+            class="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-gray-400 hover:bg-gray-800 hover:text-white text-left">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zm10 0a2
+                   2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2
+                   2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zm10 0a2 2 0 012-2h2a2 2 0 012 2v2a2
+                   2 0 01-2 2h-2a2 2 0 01-2-2v-2z" />
+            </svg>
+            <span>Dashboard</span>
+          </button>
+
+          <!-- Reservations (website bookings) -->
+          <button
+            type="button"
+            data-view="reservations"
+            class="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-gray-400 hover:bg-gray-800 hover:text-white text-left">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span>Reservations</span>
+            <span
+              id="nav-reservations-badge"
+              class="hidden ml-auto text-[10px] font-bold leading-none px-1.5 py-1 rounded-full bg-brand-600 text-white">
+              0
+            </span>
+          </button>
+
+          <!-- Expenses Log -->
+          <button
+            type="button"
+            data-view="expenses"
+            class="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-gray-400 hover:bg-gray-800 hover:text-white text-left">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0
+                   00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
+            </svg>
+            <span>Expenses Log</span>
+          </button>
+
+          <!-- Booking History -->
+          <button
+            type="button"
+            data-view="history"
+            class="nav-link w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors text-gray-400 hover:bg-gray-800 hover:text-white text-left">
+            <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span>Booking History</span>
+          </button>
+
+          <div id="sync-indicator" class="w-3 h-3 rounded-full bg-green-500" title="System Status"></div>
+        </nav>
+
+        <!-- Attendant profile pill -->
+        <div class="px-4 py-4 border-t border-gray-800">
+          <div class="flex items-center gap-3">
+            <div
+              id="sidebar-avatar"
+              class="w-8 h-8 rounded-full bg-brand-700 flex items-center justify-center text-xs font-bold text-brand-100 select-none">
+              VG
+            </div>
+            <div class="min-w-0">
+              <p id="sidebar-user-name" class="text-xs font-semibold text-white truncate">Attendant</p>
+              <p id="sidebar-user-role" class="text-xs text-gray-500">—</p>
+            </div>
+          </div>
+          <p id="sidebar-clock" class="text-xs text-gray-600 font-mono mt-3 tabular-nums"></p>
+
+          <button
+            type="button"
+            onclick="sessionStorage.clear(); window.location.reload();"
+            class="flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-red-500 transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            Logout
+          </button>
+        </div>
+      </aside>
+
+      <!-- ── MAIN CONTENT AREA ── -->
+      <main class="flex-1 md:ml-64 flex flex-col min-h-screen">
+        <!-- Sticky top header -->
+        <header
+          id="app-header"
+          class="no-print sticky top-0 z-20 bg-gray-950/90 backdrop-blur border-b border-gray-800 px-6 py-4 flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <!-- Hamburger (mobile only) -->
+            <button
+              type="button"
+              id="btn-open-drawer"
+              aria-label="Open menu"
+              class="md:hidden w-9 h-9 flex items-center justify-center rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 transition-colors text-gray-400 hover:text-white shrink-0">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+            </button>
+            <div>
+              <h1 id="page-title" class="text-lg font-semibold text-white">Room Dashboard</h1>
+              <p class="text-xs text-gray-500 mt-0.5">Live occupancy — <span id="header-date"></span></p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <!-- Occupancy stats pill (dashboard only) -->
+            <div
+              id="occupancy-stats"
+              class="hidden sm:flex items-center gap-4 bg-gray-900 rounded-lg px-4 py-2 border border-gray-800">
+              <div class="text-center">
+                <p class="text-xs text-gray-500">Available</p>
+                <p id="stat-available" class="text-lg font-bold text-emerald-400 font-mono leading-tight">—</p>
+              </div>
+              <div class="w-px h-8 bg-gray-700"></div>
+              <div class="text-center">
+                <p class="text-xs text-gray-500">Occupied</p>
+                <p id="stat-occupied" class="text-lg font-bold text-red-400 font-mono leading-tight">—</p>
+              </div>
+              <div class="w-px h-8 bg-gray-700"></div>
+              <div class="text-center">
+                <p class="text-xs text-gray-500">Total</p>
+                <p id="stat-total" class="text-lg font-bold text-white font-mono leading-tight">14</p>
+              </div>
+            </div>
+
+            <!-- Refresh button -->
+            <button
+              id="btn-refresh"
+              title="Refresh data"
+              class="w-9 h-9 flex items-center justify-center rounded-lg bg-gray-800 hover:bg-gray-700 border border-gray-700 transition-colors text-gray-400 hover:text-white">
+              <svg id="refresh-icon" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0
+                     0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+              </svg>
+            </button>
+          </div>
+        </header>
+
+        <!-- ── PAGE CONTENT SWITCHER ── -->
+        <div id="page-content" class="flex-1 p-6">
+          <!-- DASHBOARD VIEW -->
+          <div id="view-dashboard">
+            <!-- Status filter bar — sticky beneath the header -->
+            <div
+              id="room-filter-bar"
+              style="top: var(--header-height, 73px)"
+              class="no-print sticky z-10 -mt-6 mb-4 py-3 bg-gray-950/95 backdrop-blur border-b border-gray-800 flex items-center gap-2 overflow-x-auto">
+              <button
+                type="button"
+                data-filter="all"
+                class="filter-btn active shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors">
+                All
+              </button>
+              <button
+                type="button"
+                data-filter="available"
+                class="filter-btn shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors">
+                Available
+              </button>
+              <button
+                type="button"
+                data-filter="occupied"
+                class="filter-btn shrink-0 px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider border border-gray-700 text-gray-400 hover:text-white hover:border-gray-500 transition-colors">
+                Occupied
+              </button>
+            </div>
+
+            <div id="rooms-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              <!-- Loading skeleton -->
+              <div id="loading-skeleton" class="col-span-full flex flex-col items-center justify-center py-24 gap-4">
+                <div class="w-10 h-10 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+                <p class="text-sm text-gray-500">Loading rooms…</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- RESERVATIONS VIEW (website bookings — hidden until tab is clicked) -->
+          <div id="view-reservations" class="hidden">
+            <div id="reservations-container">
+              <!-- Reservation cards injected by ReservationsTab.js -->
+            </div>
+
+            <!-- Empty state — toggled by ReservationsTab.js -->
+            <div
+              id="reservations-empty-state"
+              class="hidden flex flex-col items-center justify-center py-16 gap-3 text-center">
+              <svg class="w-10 h-10 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="1.5"
+                  d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+              </svg>
+              <p class="text-sm text-gray-600">No reservations yet.</p>
+            </div>
+          </div>
+          <!-- /view-reservations -->
+
+          <!-- EXPENSES VIEW (hidden until tab is clicked) -->
+          <div id="view-expenses" class="hidden">
+            <!-- Add Expense Form -->
+            <div class="max-w-2xl mb-8">
+              <h2 class="text-base font-semibold text-white mb-4">Log New Expense</h2>
+              <div class="bg-gray-900 border border-gray-800 rounded-xl p-5 space-y-4">
+                <div class="grid grid-cols-2 gap-4">
+                  <!-- Amount -->
+                  <div>
+                    <label
+                      for="exp-amount"
+                      class="block text-xs font-semibold text-gray-400 mb-1.5 uppercase tracking-wider">
+                      Amount (KSH)
+                    </label>
+                    <input
+                      type="number"
+                      id="exp-amount"
+                      min="1"
+                      placeholder="e.g. 1500"
+                      class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors" />
+                  </div>
+
+                  <!-- Category -->
+                  <div>
+                    <label
+                      for="exp-category"
+                      class="block text-xs font-semibold text-gray-400 mb-1.5 uppercase tracking-wider">
+                      Category
+                    </label>
+                    <select
+                      id="exp-category"
+                      class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors">
+                      <option value="">Select category…</option>
+                      <option value="Utilities">Utilities</option>
+                      <option value="Supplies">Supplies</option>
+                      <option value="Maintenance">Maintenance</option>
+                      <option value="Salaries">Salaries</option>
+                      <option value="Marketing">Marketing</option>
+                      <option value="Food & Beverage">Food &amp; Beverage</option>
+                      <option value="Miscellaneous">Miscellaneous</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Description -->
+                <div>
+                  <label
+                    for="exp-description"
+                    class="block text-xs font-semibold text-gray-400 mb-1.5 uppercase tracking-wider">
+                    Description
+                  </label>
+                  <textarea
+                    id="exp-description"
+                    rows="2"
+                    placeholder="Brief description of the expense…"
+                    class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white placeholder-gray-600 resize-none focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"></textarea>
+                </div>
+
+                <div class="flex items-center gap-3">
+                  <button
+                    id="btn-save-expense"
+                    type="button"
+                    class="px-5 py-2.5 rounded-xl font-semibold text-sm bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                    Save Expense
+                  </button>
+                  <div id="expense-saving-indicator" class="hidden text-xs text-gray-500 flex items-center gap-1.5">
+                    <svg class="w-3.5 h-3.5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0
+                           0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    Saving…
+                  </div>
+                </div>
+
+                <div
+                  id="expense-form-error"
+                  class="hidden text-xs text-rose-400 bg-rose-900/20 border border-rose-800/40 rounded-lg px-3 py-2"></div>
+              </div>
+            </div>
+
+            <!-- Expenses history list — injected by main.js -->
+            <div>
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-base font-semibold text-white">
+                  Expense History
+                  <span id="expenses-scope-label" class="text-xs font-normal text-gray-500 ml-2"></span>
+                </h2>
+                <div
+                  id="expenses-total-badge"
+                  class="text-xs font-mono font-semibold text-amber-300 bg-amber-900/20 border border-amber-800/30 rounded-full px-3 py-1"></div>
+              </div>
+              <div id="expenses-container" class="space-y-3">
+                <!-- Expense rows injected by main.js renderExpenses() -->
+                <div class="flex flex-col items-center justify-center py-16 gap-3 text-center">
+                  <svg class="w-10 h-10 text-gray-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="1.5"
+                      d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0
+                         00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" />
+                  </svg>
+                  <p class="text-sm text-gray-600">No expenses logged yet.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- /view-expenses -->
+
+          <!-- BOOKING HISTORY VIEW (hidden until tab is clicked) -->
+          <div id="view-history" class="hidden">
+            <h2 class="text-base font-semibold text-white mb-4">Booking History</h2>
+
+            <!--
+              BookingHistory.js owns everything below this point: search
+              bar, totals stat boxes, month-grouped cards, and the empty
+              state. No table markup here anymore — cards reflow properly
+              on phone width, which a <table> never could.
+            -->
+            <div id="history-container"></div>
+          </div>
+          <!-- /view-history -->
+        </div>
+        <!-- /page-content -->
+      </main>
+    </div>
+    <!-- /app -->
+
+    <!-- ═══════════════════════════════════════════════════════════
+         CHECK-IN MODAL OVERLAY
+    ═══════════════════════════════════════════════════════════════ -->
+    <div
+      id="modal-overlay"
+      class="no-print fixed inset-0 z-40 bg-black/60 backdrop-blur-sm hidden opacity-0 transition-opacity duration-200"></div>
+    <div
+      id="checkin-modal"
+      class="no-print fixed inset-y-0 right-0 z-50 w-full max-w-md bg-gray-900 border-l border-gray-800 shadow-2xl translate-x-full transition-transform duration-300 ease-out flex flex-col overflow-hidden">
+      <!-- Modal content injected by CheckInModal.js -->
+    </div>
+    <div
+      id="checkout-modal"
+      class="no-print fixed inset-y-0 right-0 z-50 w-full max-w-lg bg-gray-900 border-l border-gray-800 shadow-2xl translate-x-full transition-transform duration-300 ease-out flex flex-col overflow-hidden"></div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         EDIT EXPENSE MODAL
+    ═══════════════════════════════════════════════════════════════ -->
+    <div
+      id="edit-expense-overlay"
+      class="no-print fixed inset-0 z-40 bg-black/60 backdrop-blur-sm hidden opacity-0 transition-opacity duration-200"></div>
+    <div id="edit-expense-modal" class="no-print fixed inset-0 z-50 flex items-center justify-center px-4 hidden">
+      <div class="w-full max-w-md bg-gray-900 border border-gray-800 rounded-2xl shadow-2xl p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <h3 class="text-base font-semibold text-white">Edit Expense</h3>
+          <button
+            id="edit-expense-close"
+            class="w-7 h-7 flex items-center justify-center rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-white transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <input type="hidden" id="edit-expense-id" />
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-400 mb-1.5">Amount (KSH)</label>
+            <input
+              type="number"
+              id="edit-exp-amount"
+              min="1"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors" />
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-400 mb-1.5">Category</label>
+            <select
+              id="edit-exp-category"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors">
+              <option value="Utilities">Utilities</option>
+              <option value="Supplies">Supplies</option>
+              <option value="Maintenance">Maintenance</option>
+              <option value="Salaries">Salaries</option>
+              <option value="Marketing">Marketing</option>
+              <option value="Food & Beverage">Food &amp; Beverage</option>
+              <option value="Miscellaneous">Miscellaneous</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-400 mb-1.5">Description</label>
+          <textarea
+            id="edit-exp-description"
+            rows="2"
+            class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white resize-none focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors"></textarea>
+        </div>
+        <div class="flex gap-3 pt-1">
+          <button
+            id="btn-save-edit-expense"
+            class="flex-1 py-2.5 rounded-xl font-semibold text-sm bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-500 hover:to-brand-400 text-white transition-colors">
+            Save Changes
+          </button>
+          <button
+            id="edit-expense-close-btn"
+            class="px-4 py-2.5 rounded-xl text-sm text-gray-500 hover:text-gray-300 transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         TOAST NOTIFICATION
+    ═══════════════════════════════════════════════════════════════ -->
+    <div
+      id="toast"
+      class="no-print fixed bottom-6 right-6 z-[90] max-w-xs bg-gray-800 border border-gray-700 rounded-xl shadow-xl px-4 py-3 flex items-start gap-3 translate-y-10 opacity-0 transition-all duration-300 pointer-events-none">
+      <span id="toast-icon" class="text-lg mt-0.5">✅</span>
+      <div>
+        <p id="toast-title" class="text-sm font-semibold text-white"></p>
+        <p id="toast-body" class="text-xs text-gray-400 mt-0.5"></p>
+      </div>
+    </div>
+
+    <!-- Main entry point -->
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>

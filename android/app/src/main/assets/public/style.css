@@ -1,0 +1,77 @@
+/* ═══════════════════════════════════════════════════════
+   VINTEX GUEST HOUSE — GLOBAL STYLES
+   Tailwind base + custom utilities + 80mm receipt print
+════════════════════════════════════════════════════════ */
+
+/* ── Custom scrollbar (WebKit) ── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #374151; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+
+/* ── Room card hover lift ── */
+.room-card {
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.room-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+}
+
+/* ── Nav link active state ── */
+.nav-link.active {
+  background-color: #1a3e32;
+  color: #5dac88;
+}
+.nav-link.active svg {
+  color: #5dac88;
+}
+
+/* ── Status filter bar — active pill (mirrors nav-link.active) ── */
+.filter-btn.active {
+  background-color: #1a3e32;
+  color: #5dac88;
+  border-color: #235e48;
+}
+
+/* ── Lock body scroll while the mobile sidebar drawer is open ── */
+body.drawer-open {
+  overflow: hidden;
+}
+
+/* ── Slide panel scroll ── */
+#checkin-modal {
+  scrollbar-width: thin;
+  scrollbar-color: #374151 transparent;
+}
+
+/* ── Status dot subtle pulse (hook: .status-dot-pulse in RoomCard.js) ── */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+.status-dot-pulse {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+/* ── Spin animation for refresh ── */
+@keyframes spin-once {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+.spin-once {
+  animation: spin-once 0.6s linear;
+}
+
+/* ── Leniency reason field slide-in ── */
+#leniency-block {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, opacity 0.3s ease;
+  opacity: 0;
+}
+#leniency-block.visible {
+  max-height: 200px;
+  opacity: 1;
+}
+
