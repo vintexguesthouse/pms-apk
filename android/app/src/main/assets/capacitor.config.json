@@ -1,8 +1,0 @@
-{
-	"appId": "com.vintexguesthouse.pms",
-	"appName": "Vintex PMS",
-	"webDir": "www",
-	"server": {
-		"androidScheme": "https"
-	}
-}
