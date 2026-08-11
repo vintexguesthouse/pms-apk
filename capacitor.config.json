@@ -3,6 +3,7 @@
   "appName": "Vintex PMS",
   "webDir": "www",
   "server": {
+    "url": "https://vintex-pms.vintexguesthouse.workers.dev",
     "androidScheme": "https"
   }
 }
