@@ -42,6 +42,8 @@ import {
   getReservationConflicts
 } from "./services/state.js";
 
+import { checkForUpdate, downloadAndInstallUpdate } from "./services/updateCheck.js";
+
 // ADDED: Added clean Airtable CRUD operations here
 import {
   fetchRooms,
@@ -1433,6 +1435,11 @@ async function _init() {
   _wireSidebarDrawer();
   _wireRoomFilterBar();
   _subscribeToState();
+  _wireUpdateCheckButton();
+  
+  if (CURRENT_ROLE === "owner") {
+    _maybeCheckForUpdate();           // ← new, only owner ever triggers the GitHub call
+  }
 
   _syncHeaderHeightVar();
   window.addEventListener("load", _syncHeaderHeightVar);
@@ -1458,6 +1465,40 @@ async function _init() {
     }
   });
 }
+
+async function _maybeCheckForUpdate() {
+  const update = await checkForUpdate();
+  const btn = document.getElementById("update-available-btn");
+  if (!btn || !update) return;
+
+  btn.dataset.downloadUrl = update.downloadUrl;
+  btn.title = `v${update.latestVersion} available — you're on v${update.currentVersion}`;
+  btn.classList.remove("hidden");
+}
+
+function _wireUpdateCheckButton() {
+  const btn = document.getElementById("update-available-btn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    const url = btn.dataset.downloadUrl;
+    if (!url) return;
+
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = "Downloading…";
+
+    try {
+      await downloadAndInstallUpdate(url);
+    } catch (err) {
+      showToast("error", "Update failed", err instanceof Error ? err.message : "Could not download the update.");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+}
+
 
 // ─────────────────────────────────────────────────────
 // Bootstrap

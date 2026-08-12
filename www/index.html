@@ -238,6 +238,13 @@
           <p id="sidebar-clock" class="text-xs text-gray-600 font-mono mt-3 tabular-nums"></p>
 
           <button
+            id="update-available-btn"
+            type="button"
+            class="hidden w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-900/40 border border-amber-700/50 text-amber-300 hover:bg-amber-900/60 transition-colors">
+            Update Available
+          </button>
+
+          <button
             type="button"
             onclick="sessionStorage.clear(); window.location.reload();"
             class="flex items-center gap-2 px-3 py-2 text-sm text-gray-500 hover:text-red-500 transition-colors">
