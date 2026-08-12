@@ -66,7 +66,8 @@ import {
   patchReservation as patchReservationAPI
 } from "./services/api.js";
 
-import { initAuthGate, getActiveUser, getActiveRole } from "./services/auth.js";
+import { initAuthGate, getActiveUser, getActiveRole, clearSession } from "./services/auth.js";
+import { initLockScreen } from "./services/lockScreen.js";
 
 import { renderRoomsGrid } from "./components/RoomCard.js";
 import { renderReservationsTab } from "./components/ReservationsTab.js";
@@ -1434,9 +1435,12 @@ async function _init() {
   _wireEditExpenseModal();
   _wireSidebarDrawer();
   _wireRoomFilterBar();
+  _wireLogoutButton();
   _subscribeToState();
   _wireUpdateCheckButton();
-  
+
+  initLockScreen();
+
   if (CURRENT_ROLE === "owner") {
     _maybeCheckForUpdate();           // ← new, only owner ever triggers the GitHub call
   }
@@ -1463,6 +1467,21 @@ async function _init() {
       _renderExpenses();
       _loadReservations();
     }
+  });
+}
+
+/**
+ * Wires the sidebar Logout button. Replaces the previous inline
+ * onclick, which cleared sessionStorage — a bucket auth.js never
+ * actually writes to, so the button silently did nothing. Real
+ * session data lives in localStorage via auth.js's clearSession().
+ */
+function _wireLogoutButton() {
+  const btn = document.getElementById("btn-logout");
+  if (!btn) return;
+  btn.addEventListener("click", () => {
+    clearSession();
+    window.location.reload();
   });
 }
 

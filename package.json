@@ -16,7 +16,8 @@
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",
-    "@capacitor/filesystem": "^8.1.2"
+    "@capacitor/filesystem": "^8.1.2",
+    "@capgo/capacitor-native-biometric": "^8.6.4"
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
