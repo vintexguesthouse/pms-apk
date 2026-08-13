@@ -7,5 +7,10 @@ compatibility_date = "2024-09-01"
 # only ever serves /api/* routes.
 [assets]
 directory = "./www"
-binding = "ASSETS"
 
+# Gives this Worker a proper hostname under the same zone the gateway
+# already uses (api.vintexguesthouse.com) — no new DNS record needed,
+# since the zone is already on Cloudflare.
+[[routes]]
+pattern = "pms.vintexguesthouse.com/*"
+zone_name = "vintexguesthouse.com"
