@@ -30,9 +30,23 @@
  *   initLockScreen()  → void   (call once, after auth passes)
  */
 
-import { Capacitor } from "@capacitor/core";
-import { App as CapApp } from "@capacitor/app";
 import { isAuthenticated, isSessionAbsoluteExpired, clearSession } from "./auth.js";
+
+// NOTE: this app is served as raw static files (no Vite/webpack/esbuild
+// bundling step), so bare specifiers like "@capacitor/core" can't be
+// resolved by the browser's native ES module loader — only a bundler
+// rewrites those into real paths. On a native build, Capacitor's runtime
+// injects a `window.Capacitor` global itself (that's what the npm
+// `@capacitor/core` package normally just wraps), so we read off that
+// instead of importing the package. In a plain browser tab (dev/preview,
+// no native shell) `window.Capacitor` is simply undefined, so we fall
+// back to a small stub whose `isNativePlatform()` returns false — every
+// call site in this file already branches off that check.
+const Capacitor = window.Capacitor ?? { isNativePlatform: () => false, Plugins: {} };
+// The official @capacitor/app plugin auto-registers itself on
+// window.Capacitor.Plugins.App inside a real native shell — same object,
+// same method names (addListener, etc.) the npm wrapper would give you.
+const CapApp = Capacitor.Plugins?.App;
 
 const IDLE_MS = 15 * 60 * 1000; // 15 minutes
 const ACTIVITY_EVENTS = ["click", "touchstart", "keydown", "scroll", "mousemove"];
@@ -75,7 +89,7 @@ export function initLockScreen() {
 
   ACTIVITY_EVENTS.forEach((evt) => document.addEventListener(evt, _resetIdleTimer, { passive: true }));
 
-  if (Capacitor.isNativePlatform()) {
+  if (Capacitor.isNativePlatform() && CapApp) {
     CapApp.addListener("appStateChange", ({ isActive }) => {
       if (!isActive) {
         _backgroundedAt = Date.now();

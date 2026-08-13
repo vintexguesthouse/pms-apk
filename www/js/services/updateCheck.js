@@ -5,11 +5,25 @@
 // GitHub Release tag for this repo, and — if the owner accepts —
 // downloads and hands the APK to the system installer.
 
-import { Capacitor } from '@capacitor/core';
-import { App } from '@capacitor/app';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { FileOpener } from '@capacitor-community/file-opener';
 import { getActiveRole } from './auth.js';
+
+// Same reasoning as services/lockScreen.js: www/ is served unbundled, so
+// bare specifiers like "@capacitor/core" can't resolve in the browser.
+// Read the plugin proxies straight off the window.Capacitor global that
+// Capacitor's native runtime injects, instead of importing the npm
+// wrapper packages around them.
+const Capacitor = window.Capacitor ?? { isNativePlatform: () => false, Plugins: {} };
+const App = Capacitor.Plugins?.App;
+const Filesystem = Capacitor.Plugins?.Filesystem;
+// Directory is just a plain string-constant enum in @capacitor/filesystem
+// (not a plugin call), so there's nothing to read off window.Capacitor for
+// it — the value itself is hardcoded below where it's used.
+const Directory = { Cache: 'CACHE' };
+// @capacitor-community/file-opener is a third-party (non-@capacitor/*)
+// plugin. It still self-registers under its plugin name if it was built
+// into this native binary, but that's less guaranteed than the official
+// plugins above — confirm this on a real device before relying on it.
+const FileOpener = Capacitor.Plugins?.FileOpener;
 
 const GITHUB_REPO = 'vintexguesthouse/pms-apk';
 const RELEASES_API = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
