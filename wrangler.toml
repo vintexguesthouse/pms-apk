@@ -1,0 +1,11 @@
+name = "vintex-pms"
+compatibility_date = "2024-09-01"
+
+# Serves the Capacitor app's frontend (www/) as static assets. This is
+# what capacitor.config.json's server.url loads at runtime in
+# remote-first mode — NOT the same Worker as vintex-gateway, which
+# only ever serves /api/* routes.
+[assets]
+directory = "./www"
+binding = "ASSETS"
+
