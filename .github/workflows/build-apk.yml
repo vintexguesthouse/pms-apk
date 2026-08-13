@@ -1,4 +1,10 @@
-name: Build Android APK
+name: Smoke Build (every push)
+#
+# Sanity check only — proves the app still compiles on every push.
+# This is NOT what the owner installs anymore; that's
+# release-apk.yml, triggered by a version tag, which signs with the
+# real persistent keystore and publishes a GitHub Release. Nothing
+# from this workflow should ever be handed to a device.
 on: [push]
 jobs:
   build:
@@ -18,13 +24,14 @@ jobs:
         run: npm run build:css
       - name: Sync Capacitor
         run: npx cap sync android
-      - name: Build Debug APK
+      - name: Build Debug APK (unsigned/self-signed, smoke test only)
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
-      - name: Upload APK Artifact
+      - name: Upload APK Artifact (CI verification only — not for install)
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: app-debug-smoke-build
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14

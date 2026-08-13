@@ -36,6 +36,7 @@
 
 let _lastBookings = [];
 let _onDelete = null;
+let _onLogPastStay = null;
 let _searchQuery = "";
 let _dateFrom = "";
 let _dateTo = "";
@@ -375,6 +376,17 @@ function _buildMonthGroup(monthKey, rows) {
 function _buildShell() {
   return `
     <div class="mb-4 space-y-3">
+      <div class="flex items-center justify-between gap-3">
+        <h2 class="text-sm font-semibold text-gray-300">Booking History</h2>
+        <button type="button" id="history-log-past-stay-btn"
+          class="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-800 bg-gray-900
+                 hover:bg-gray-800 hover:border-brand-500 text-xs font-medium text-gray-300 hover:text-white transition-colors">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+          </svg>
+          <span>Log a Past Stay</span>
+        </button>
+      </div>
       <div class="relative">
         <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-4.35-4.35M17 10a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -496,6 +508,9 @@ function _render() {
       const exported = _exportVisibleRows();
       if (!exported) _flashDownloadBtnEmpty(downloadBtn);
     });
+
+    const logPastStayBtn = container.querySelector("#history-log-past-stay-btn");
+    logPastStayBtn?.addEventListener("click", () => _onLogPastStay?.());
   }
 
   _renderList();
@@ -557,13 +572,20 @@ function _wireDeleteDelegation(container) {
  *
  * @param {Array<Object>} bookings - Raw bookings from fetchBookings().
  *   Only records with is_active === false are shown.
- * @param {{ onDelete?: (row: Object) => Promise<boolean> }} [callbacks]
+ * @param {{
+ *   onDelete?: (row: Object) => Promise<boolean>,
+ *   onLogPastStay?: () => void
+ * }} [callbacks]
  *   onDelete is called with the normalized row ({ id, guest_name,
  *   room_name, ... }) after the second confirm tap, and should resolve
  *   true on success (removes the card from the list) or false on
  *   failure (reverts the button so the user can retry).
+ *   onLogPastStay is called when the "+ Log a Past Stay" button is
+ *   clicked — this component never opens PastStayModal itself, it just
+ *   asks the caller to (same callback-injection pattern as every other
+ *   modal trigger in this app).
  */
-export function renderBookingHistory(bookings, { onDelete } = {}) {
+export function renderBookingHistory(bookings, { onDelete, onLogPastStay } = {}) {
   const container = document.getElementById("history-container");
   if (!container) {
     console.error("[BookingHistory] #history-container not found in DOM.");
@@ -571,6 +593,7 @@ export function renderBookingHistory(bookings, { onDelete } = {}) {
   }
 
   _onDelete = onDelete ?? null;
+  _onLogPastStay = onLogPastStay ?? null;
   _lastBookings = (Array.isArray(bookings) ? bookings : [])
     .filter((b) => !b.is_active)
     .map(_normalizeBooking)

@@ -72,6 +72,7 @@ import { initLockScreen } from "./services/lockScreen.js";
 import { renderRoomsGrid } from "./components/RoomCard.js";
 import { renderReservationsTab } from "./components/ReservationsTab.js";
 import { openModal as openCheckInModal, closeModal as closeCheckInModal } from "./components/CheckInModal.js";
+import { openModal as openPastStayModal } from "./components/PastStayModal.js";
 import {
   openModal as openCheckOutModal,
   closeModal as closeCheckOutModal,
@@ -887,14 +888,22 @@ function _onCardClick(room) {
 // Check-in handler
 // ─────────────────────────────────────────────────────
 async function _handleCheckIn(groupFormData) {
-  const { rooms: roomsData, payment_method, payment_reference } = groupFormData;
+  const { rooms: roomsData, payment_method, payment_reference, checkInDate } = groupFormData;
   const created_by = getActiveUser() ?? "unknown";
   const isGroup = roomsData.length > 1;
 
   // Payment status/amount now come from CheckInModal.js per room (paid
   // in full / partial deposit / pay-at-checkout) instead of being
   // hardcoded — see payments.js's renderPaymentStatusFields().
-  const checkInTimestamp = new Date().toISOString();
+  //
+  // checkInDate comes from CheckInModal's backdate toggle — it's just
+  // today's date for a normal check-in, or the attendant-chosen date
+  // when "This check-in actually happened earlier" is on. Either way
+  // the room is occupied *now*, so live room state below still flips
+  // to occupied immediately regardless of which date this resolves to.
+  const checkInTimestamp = checkInDate
+    ? new Date(`${checkInDate}T00:00:00`).toISOString()
+    : new Date().toISOString();
 
   setSyncStatus("saving");
 
@@ -974,7 +983,11 @@ async function _handleCheckIn(groupFormData) {
     created_by,
     // Same ref CheckInModal generated for the whole group — this is
     // the anchor state.js/CheckOutModal use to find sibling rooms.
-    Client_Booking_Ref: formData.Client_Booking_Ref
+    Client_Booking_Ref: formData.Client_Booking_Ref,
+    // Only present when CheckInModal's backdate toggle was on — omit
+    // rather than send is_backdated: false, matching the field's
+    // hasOwnProperty-gated pass-through in sanitizeBookingFields.
+    ...(formData.is_backdated ? { is_backdated: true, late_entry_reason: formData.late_entry_reason } : {})
   }));
 
   const result = await bulkCheckIn(recordsArray);
@@ -1558,10 +1571,29 @@ async function _renderHistoryView() {
 
   if (result.ok) {
     // Pass the raw bookings array to the component
-    renderBookingHistory(result.bookings, { onDelete: _handleDeleteHistoryBooking });
+    renderBookingHistory(result.bookings, {
+      onDelete: _handleDeleteHistoryBooking,
+      onLogPastStay: _handleOpenPastStayModal
+    });
   } else {
     container.innerHTML = '<p class="text-red-500 text-center py-10">Failed to load history.</p>';
   }
+}
+
+/**
+ * Opens the "Log a Past Stay" modal. This flow never touches live room
+ * state — PastStayModal.js writes directly to /api/checkin/past via
+ * api.js and, on success, this only refreshes the Booking History list
+ * (same fetchBookings() call _renderHistoryView already uses).
+ */
+function _handleOpenPastStayModal() {
+  openPastStayModal(ROOM_DEFINITIONS, {
+    createdBy: getActiveUser() ?? "unknown",
+    onSuccess: () => {
+      showToast("success", "Past stay logged", "Booking History has been updated.");
+      _renderHistoryView();
+    }
+  });
 }
 
 // ─────────────────────────────────────────────────────

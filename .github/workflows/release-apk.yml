@@ -1,0 +1,95 @@
+name: Release APK
+#
+# This is the ONLY workflow that produces what the owner actually
+# installs. Triggered by pushing a version tag (e.g. `git tag v1.4.0
+# && git push --tags`) — every push to a branch does NOT trigger this,
+# on purpose, so a Release/version bump is always a deliberate act.
+#
+# Publishes a GitHub Release with the signed APK attached, which is
+# exactly what services/updateCheck.js's checkForUpdate() has been
+# looking for via the GitHub Releases API — before this workflow
+# existed, nothing ever created that Release, so the in-app "Update
+# Available" button could never have anything to find.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write   # required to publish a GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Install Dependencies
+        run: npm ci
+      - name: Build Tailwind CSS
+        run: npm run build:css
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # Turns the pushed tag (e.g. "v1.4.2") into the versionName/
+      # versionCode build.gradle now expects via -P properties. The
+      # versionCode formula packs major/minor/patch into a single
+      # strictly-increasing integer, so every real release is
+      # guaranteed to have a higher versionCode than the last —
+      # Android refuses to offer an "update" without that.
+      - name: Derive version from tag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION_NAME="${TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION_NAME"
+          VERSION_CODE=$((MAJOR * 1000000 + MINOR * 1000 + PATCH))
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+
+      # Decodes the ONE persistent release keystore from a repo
+      # secret (never an artifact — artifacts expire, secrets don't).
+      # Generate this keystore locally, once, and never regenerate it:
+      #   keytool -genkeypair -v -keystore release.keystore \
+      #     -alias vintex-pms-release -keyalg RSA -keysize 2048 \
+      #     -validity 10000
+      # Then: base64 -i release.keystore | pbcopy   (or -w0 on Linux)
+      # and paste that into the ANDROID_RELEASE_KEYSTORE_BASE64 secret.
+      - name: Decode release keystore
+        run: echo "${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}" | base64 -d > android/app/release.keystore
+
+      - name: Build signed release APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -PRELEASE_STORE_FILE=release.keystore \
+            -PRELEASE_STORE_PASSWORD="${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -PRELEASE_KEY_ALIAS="${{ secrets.ANDROID_KEY_ALIAS }}" \
+            -PRELEASE_KEY_PASSWORD="${{ secrets.ANDROID_KEY_PASSWORD }}" \
+            -PAPP_VERSION_NAME="${{ steps.version.outputs.version_name }}" \
+            -PAPP_VERSION_CODE=${{ steps.version.outputs.version_code }}
+
+      # Deletes the decoded keystore from the runner's workspace as
+      # soon as it's no longer needed — it's already baked into the
+      # signed APK at this point, no reason to leave the raw key file
+      # sitting around for the rest of the job.
+      - name: Remove decoded keystore from workspace
+        if: always()
+        run: rm -f android/app/release.keystore
+
+      - name: Publish GitHub Release with signed APK attached
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: v${{ steps.version.outputs.version_name }}
+          generate_release_notes: true
+          files: android/app/build/outputs/apk/release/app-release.apk

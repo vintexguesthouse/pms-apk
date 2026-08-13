@@ -72,6 +72,14 @@ let _ownerMode = false;
 let _pendingCheckInConfirm = false;
 let _conflictConfirmTimeout = null;
 
+// Backdated check-in toggle state ("This check-in actually happened
+// earlier"). Off by default — when off, the flow is byte-for-byte
+// unchanged from a normal check-in.
+const MAX_BACKDATE_DAYS = 30;
+let _backdateEnabled = false;
+let _backdateDate = "";        // "YYYY-MM-DD"
+let _lateEntryReason = "";
+
 // ─────────────────────────────────────────────────────
 // Internal helpers
 // ─────────────────────────────────────────────────────
@@ -99,6 +107,33 @@ function _safeId(roomName) {
 }
 
 /**
+ * Validates a candidate backdated date string ("YYYY-MM-DD"): must not
+ * be in the future, and must not be more than MAX_BACKDATE_DAYS in the
+ * past. Shared with PastStayModal.js so both flows enforce the exact
+ * same window instead of drifting apart.
+ * @param {string} dateStr
+ * @returns {{ valid: boolean, message: string }}
+ */
+export function validateBackdateDate(dateStr) {
+  if (!dateStr) return { valid: false, message: "Select a date." };
+
+  const chosen = new Date(`${dateStr}T00:00:00`);
+  if (isNaN(chosen.getTime())) return { valid: false, message: "Enter a valid date." };
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  if (chosen > today) return { valid: false, message: "Date can't be in the future." };
+
+  const earliest = new Date(today);
+  earliest.setDate(earliest.getDate() - MAX_BACKDATE_DAYS);
+  if (chosen < earliest) {
+    return { valid: false, message: `Date can't be more than ${MAX_BACKDATE_DAYS} days in the past.` };
+  }
+
+  return { valid: true, message: "" };
+}
+
+/**
  * Generates the single Client_Booking_Ref for a check-in group:
  * YYYYMMDD-GUESTNAME (e.g. "20260705-JOHN-DOE").
  *
@@ -110,10 +145,14 @@ function _safeId(roomName) {
  * grouping design.
  *
  * @param {string} guestName
+ * @param {string} [dateStr] - Optional "YYYY-MM-DD" override (backdated
+ *   check-in / logged past stay). When omitted, uses the current date —
+ *   the stay's ref must reflect when it actually started, not when it
+ *   was logged, so Booking History's month-grouping files it correctly.
  * @returns {string}
  */
-function _generateClientBookingRef(guestName) {
-  const now = new Date();
+export function generateClientBookingRef(guestName, dateStr) {
+  const now = dateStr ? new Date(`${dateStr}T00:00:00`) : new Date();
   const datePart = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(
     now.getDate()
   ).padStart(2, "0")}`;
@@ -291,6 +330,34 @@ function _buildCheckInForm() {
     </div>
 
     <div class="flex-1 overflow-y-auto px-5 py-5 space-y-5">
+
+      <div class="rounded-lg bg-gray-800/40 border border-gray-700 px-4 py-3">
+        <label class="flex items-center justify-between gap-3 cursor-pointer select-none" for="ci-backdate-toggle">
+          <span class="text-sm text-gray-300">This check-in actually happened earlier</span>
+          <input id="ci-backdate-toggle" type="checkbox"
+            class="w-4 h-4 rounded border-gray-600 bg-gray-800 text-brand-500 focus:ring-brand-500 focus:ring-offset-0" />
+        </label>
+
+        <div id="ci-backdate-fields" class="hidden mt-3 space-y-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-400 mb-1.5" for="ci-backdate-date">
+              When did this check-in actually happen?
+            </label>
+            <input id="ci-backdate-date" type="date" value="${_todayISO()}"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white
+                     focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors" />
+            <p id="ci-backdate-error" class="text-xs text-red-400 hidden mt-1.5"></p>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-400 mb-1.5" for="ci-backdate-reason">
+              Reason for late entry
+            </label>
+            <input id="ci-backdate-reason" type="text" placeholder="e.g. Paper record from Friday, entered today"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2.5 text-sm text-white
+                     placeholder-gray-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors" />
+          </div>
+        </div>
+      </div>
 
       <div>
         <label class="block text-xs font-semibold text-gray-400 mb-1.5" for="ci-guest-name">
@@ -488,12 +555,24 @@ function _validateSharedFields() {
 
   const hasGuest = guestInput.value.trim().length > 0;
   const hasNights = Number(nightsInput.value) >= 1;
-  const valid = hasGuest && hasNights;
+  let valid = hasGuest && hasNights;
+  let message = !hasGuest ? "Guest name is required." : "Enter a valid number of nights.";
+
+  if (valid && _backdateEnabled) {
+    const dateCheck = validateBackdateDate(_backdateDate);
+    if (!dateCheck.valid) {
+      valid = false;
+      message = dateCheck.message;
+    } else if (!_lateEntryReason.trim()) {
+      valid = false;
+      message = "Enter a reason for the late entry.";
+    }
+  }
 
   saveBtn.disabled = !valid;
 
-  if (!valid && (guestInput.value || nightsInput.value)) {
-    validationMsg.textContent = !hasGuest ? "Guest name is required." : "Enter a valid number of nights.";
+  if (!valid && (guestInput.value || nightsInput.value || _backdateEnabled)) {
+    validationMsg.textContent = message;
     validationMsg.classList.remove("hidden");
   } else {
     validationMsg.classList.add("hidden");
@@ -598,6 +677,38 @@ function _wireCheckInForm() {
   const paymentFieldsContainer = document.getElementById("ci-payment-fields");
   const roomsList = document.getElementById("ci-rooms-list")?.parentElement; // #ci-rooms-section
 
+  // 0. Backdate toggle + its date/reason fields (shared, never re-created)
+  const backdateToggle = document.getElementById("ci-backdate-toggle");
+  const backdateFields = document.getElementById("ci-backdate-fields");
+  const backdateDateInput = document.getElementById("ci-backdate-date");
+  const backdateReasonInput = document.getElementById("ci-backdate-reason");
+  const backdateError = document.getElementById("ci-backdate-error");
+
+  backdateToggle.addEventListener("change", (e) => {
+    _backdateEnabled = e.target.checked;
+    backdateFields.classList.toggle("hidden", !_backdateEnabled);
+    if (_backdateEnabled && !_backdateDate) _backdateDate = backdateDateInput.value;
+    if (!_backdateEnabled) backdateError.classList.add("hidden");
+    _validateSharedFields();
+  });
+
+  backdateDateInput.addEventListener("input", () => {
+    _backdateDate = backdateDateInput.value;
+    const { valid, message } = validateBackdateDate(_backdateDate);
+    if (!valid) {
+      backdateError.textContent = message;
+      backdateError.classList.remove("hidden");
+    } else {
+      backdateError.classList.add("hidden");
+    }
+    _validateSharedFields();
+  });
+
+  backdateReasonInput.addEventListener("input", () => {
+    _lateEntryReason = backdateReasonInput.value;
+    _validateSharedFields();
+  });
+
   // 1. Shared input listeners (guest name / nights never get re-created)
   guestInput.addEventListener("input", _validateSharedFields);
   nightsInput.addEventListener("input", () => {
@@ -682,13 +793,20 @@ function _wireCheckInForm() {
 
     validationMsg.classList.add("hidden");
 
+    // A backdated check-in's occupancy starts on the chosen date, not
+    // today — everything downstream (the ref below, and main.js's write
+    // to /api/checkin) keys off this value.
+    const checkInDateStr = _backdateEnabled ? _backdateDate : _todayISO();
+
     // One Client_Booking_Ref per group, generated here and stamped onto
     // every room below — including rooms that were added mid-session via
     // "+ Add Room", since they're already in _activeGroup by the time
     // Save is clicked. This is what lets a multi-room stay be found again
     // later (e.g. CheckOutModal's sibling lookup) using a single shared
-    // field instead of a manually-typed reference.
-    const clientBookingRef = _generateClientBookingRef(guestName);
+    // field instead of a manually-typed reference. Generated from the
+    // backdated date when set, so month-grouping in Booking History
+    // files it under when the stay actually started.
+    const clientBookingRef = generateClientBookingRef(guestName, checkInDateStr);
 
     // NOTE: rate_variance / grand_total are included here for any caller
     // that still wants them for local UI math (e.g. a receipt preview),
@@ -720,7 +838,12 @@ function _wireCheckInForm() {
         grand_total: grandTotal,
         Client_Booking_Ref: clientBookingRef,
         payment_status: paymentStatus,
-        amount_paid: amountPaid
+        amount_paid: amountPaid,
+        // Omitted entirely (not sent as `false`) when the toggle is
+        // off, matching sanitizeBookingFields' hasOwnProperty check —
+        // an untouched booking should never explicitly claim
+        // is_backdated: false.
+        ...(_backdateEnabled ? { is_backdated: true, late_entry_reason: _lateEntryReason.trim() } : {})
       };
     });
 
@@ -729,7 +852,8 @@ function _wireCheckInForm() {
       payment_method: paymentMethod,
       payment_reference: reference || null,
       created_by: "system",
-      Client_Booking_Ref: clientBookingRef
+      Client_Booking_Ref: clientBookingRef,
+      checkInDate: checkInDateStr
     });
   });
 
@@ -782,6 +906,9 @@ export function openModal(rooms, { onCheckIn, ownerMode = false, getAvailableRoo
   _pendingCheckInConfirm = false;
   clearTimeout(_conflictConfirmTimeout);
   _conflictConfirmTimeout = null;
+  _backdateEnabled = false;
+  _backdateDate = "";
+  _lateEntryReason = "";
 
   // Inject HTML
   modal.innerHTML = _buildCheckInForm();
@@ -836,4 +963,7 @@ export function closeModal() {
   _pendingCheckInConfirm = false;
   clearTimeout(_conflictConfirmTimeout);
   _conflictConfirmTimeout = null;
+  _backdateEnabled = false;
+  _backdateDate = "";
+  _lateEntryReason = "";
 }

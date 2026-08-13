@@ -88,6 +88,25 @@ export async function bulkCheckIn(recordsArray) {
   });
 }
 
+/**
+ * Logs one or more already-completed stays (paper records entered
+ * late). Unlike bulkCheckIn, these are written as CLOSED bookings —
+ * is_active: false is set server-side regardless of what's sent —
+ * and this never touches live room availability the way a real
+ * check-in does.
+ * @param {Object[]} recordsArray
+ */
+export async function logPastStay(recordsArray) {
+  if (!Array.isArray(recordsArray) || recordsArray.length === 0) {
+    return { ok: false, error: "logPastStay requires a non-empty array of booking records." };
+  }
+  _logPayload("POST /api/checkin/past", recordsArray);
+  return _apiFetch("/api/checkin/past", {
+    method: "POST",
+    body: JSON.stringify({ records: recordsArray })
+  });
+}
+
 // 3. CHECK OUT
 export async function checkOut(airtableId, payload) {
   return _apiFetch("/api/checkout", {
