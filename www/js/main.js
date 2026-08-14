@@ -365,7 +365,9 @@ function _wireRoomFilterBar() {
 /** Case/whitespace-insensitive key for matching a room name across
  * ROOM_DEFINITIONS (Title Case) and Airtable's rooms table (ALL CAPS). */
 function _normalizeRoomKey(name) {
-  return String(name ?? "").trim().toUpperCase();
+  return String(name ?? "")
+    .trim()
+    .toUpperCase();
 }
 
 function _mergeData(rooms, bookings, shopLineItems) {
@@ -503,10 +505,7 @@ async function _loadExpenses() {
 async function _loadReservations() {
   setState({ ui: { ...getState().ui, reservationsLoading: true } }, "loadReservations");
 
-  const [reservationsResult, lineItemsResult] = await Promise.all([
-    fetchReservations(),
-    fetchReservationLineItems()
-  ]);
+  const [reservationsResult, lineItemsResult] = await Promise.all([fetchReservations(), fetchReservationLineItems()]);
 
   if (!reservationsResult.ok) {
     setReservations([]);
@@ -870,7 +869,7 @@ function _onCardClick(room) {
       onExtendNights: _handleExtendNights,
       onDeleteBooking: _handleDeleteBooking,
       // Inject the selectors
-      getRelatedRooms: (anchor, excluded) => getRelatedRooms(anchor, excluded), 
+      getRelatedRooms: (anchor, excluded) => getRelatedRooms(anchor, excluded),
       getAvailableRooms: (excluded) => getAvailableRooms(excluded)
     });
   } else if (room.status === "error") {
@@ -901,9 +900,7 @@ async function _handleCheckIn(groupFormData) {
   // when "This check-in actually happened earlier" is on. Either way
   // the room is occupied *now*, so live room state below still flips
   // to occupied immediately regardless of which date this resolves to.
-  const checkInTimestamp = checkInDate
-    ? new Date(`${checkInDate}T00:00:00`).toISOString()
-    : new Date().toISOString();
+  const checkInTimestamp = checkInDate ? new Date(`${checkInDate}T00:00:00`).toISOString() : new Date().toISOString();
 
   setSyncStatus("saving");
 
@@ -955,11 +952,7 @@ async function _handleCheckIn(groupFormData) {
   clearSelection();
 
   const guestLabel = roomsData[0]?.guest_name ?? "guest";
-  showToast(
-    "info",
-    isGroup ? `Saving check-in for ${roomsData.length} rooms…` : "Saving check-in…",
-    guestLabel
-  );
+  showToast("info", isGroup ? `Saving check-in for ${roomsData.length} rooms…` : "Saving check-in…", guestLabel);
 
   // Write the whole group via bulkCheckIn — chunked into Airtable's
   // 10-record batch limit and sent as sequential batches, instead of
@@ -1259,9 +1252,7 @@ async function _handleCheckOut(payload) {
     // side. Flag every room 'error' so the front desk sees it needs a
     // retry, instead of leaving them looking like a normal occupied room.
     setSyncStatus("error");
-    const roomNames = bookingIds
-      .map((id) => stateRooms.find((r) => r.booking_id === id)?.room_name)
-      .filter(Boolean);
+    const roomNames = bookingIds.map((id) => stateRooms.find((r) => r.booking_id === id)?.room_name).filter(Boolean);
     markRoomsError(roomNames, result.error ?? "Checkout failed to save.");
     showToast("error", "Checkout failed", result.error ?? "Could not check out any rooms.");
     return;
@@ -1325,7 +1316,6 @@ async function _handleCheckOut(payload) {
   await _loadRooms(); // Refresh the list from the source of truth
 }
 
-
 // ─────────────────────────────────────────────────────
 // Multi-select floating action bar (group check-in)
 // ─────────────────────────────────────────────────────
@@ -1367,9 +1357,7 @@ function _renderMultiSelectBar(selectedRooms) {
 
   document.getElementById("btn-group-checkin").onclick = () => {
     const { rooms } = getState();
-    const roomsToCheckIn = rooms.filter(
-      (r) => selectedRooms.includes(r.room_name) && r.status === "available"
-    );
+    const roomsToCheckIn = rooms.filter((r) => selectedRooms.includes(r.room_name) && r.status === "available");
 
     if (roomsToCheckIn.length === 0) {
       showToast("error", "No rooms to check in", "Selected rooms are no longer available.");
@@ -1455,7 +1443,7 @@ async function _init() {
   initLockScreen();
 
   if (CURRENT_ROLE === "owner") {
-    _maybeCheckForUpdate();           // ← new, only owner ever triggers the GitHub call
+    _maybeCheckForUpdate(); // ← new, only owner ever triggers the GitHub call
   }
 
   _syncHeaderHeightVar();
@@ -1531,7 +1519,6 @@ function _wireUpdateCheckButton() {
   });
 }
 
-
 // ─────────────────────────────────────────────────────
 // Bootstrap
 // ─────────────────────────────────────────────────────
@@ -1565,6 +1552,7 @@ async function _renderHistoryView() {
   // entire subtree (search bar, totals, month groups), so loading/error
   // states here are plain markup too, no longer <tr><td> scaffolding.
   container.innerHTML = '<p class="text-gray-500 text-center py-10">Loading history...</p>';
+  delete container.dataset.shellBuilt; // reset so BookingHistory.js rebuilds the shell it just wiped
 
   // Reuse the existing fetchBookings API call
   const result = await fetchBookings();
@@ -1636,9 +1624,7 @@ async function _handleAssignReservationRoom(reservation, lineItem, room) {
   const checkInDate = new Date();
   const checkOutDate = reservation.check_out ? new Date(reservation.check_out) : null;
   const reservationCheckIn = reservation.check_in ? new Date(reservation.check_in) : checkInDate;
-  const rawNights = checkOutDate
-    ? Math.round((checkOutDate.getTime() - reservationCheckIn.getTime()) / 86400000)
-    : 1;
+  const rawNights = checkOutDate ? Math.round((checkOutDate.getTime() - reservationCheckIn.getTime()) / 86400000) : 1;
   const nights = Math.max(1, rawNights || 1);
 
   setSyncStatus("saving");
@@ -1663,7 +1649,11 @@ async function _handleAssignReservationRoom(reservation, lineItem, room) {
 
   if (!result.ok) {
     setSyncStatus("error");
-    showToast("error", "Check-in failed", result.error ?? `Could not check ${reservation.guest_name} into ${room.room_name}.`);
+    showToast(
+      "error",
+      "Check-in failed",
+      result.error ?? `Could not check ${reservation.guest_name} into ${room.room_name}.`
+    );
     return;
   }
 
@@ -1787,7 +1777,6 @@ async function _handleCancelReservation(reservation) {
   setSyncStatus("synced");
   showToast("success", "Reservation cancelled", reservation.guest_name ?? "");
 }
-
 
 // ─────────────────────────────────────────────────────
 // Add this helper function at the bottom of main.js
