@@ -44,7 +44,7 @@ import {
 
 import { checkForUpdate, downloadAndInstallUpdate } from "./services/updateCheck.js";
 
-// ADDED: Added clean Airtable CRUD operations here
+// ADDED: Added clean D1-backed CRUD operations here
 import {
   fetchRooms,
   fetchBookings,
@@ -363,7 +363,7 @@ function _wireRoomFilterBar() {
 // ─────────────────────────────────────────────────────
 
 /** Case/whitespace-insensitive key for matching a room name across
- * ROOM_DEFINITIONS (Title Case) and Airtable's rooms table (ALL CAPS). */
+ * ROOM_DEFINITIONS (Title Case) and D1's rooms table (ALL CAPS). */
 function _normalizeRoomKey(name) {
   return String(name ?? "")
     .trim()
@@ -371,14 +371,24 @@ function _normalizeRoomKey(name) {
 }
 
 function _mergeData(rooms, bookings, shopLineItems) {
-  // Airtable's `rooms.room_name` is stored ALL CAPS ("CHARITY") while
+  // D1's `rooms.room_name` is stored ALL CAPS ("CHARITY") while
   // ROOM_DEFINITIONS below uses Title Case ("Charity") — a plain Map
   // lookup between the two silently missed every single room, which is
   // why category_id (and therefore the Reservations tab's room picker)
   // always came back empty. Normalize both sides before comparing.
   const roomsByName = new Map((rooms ?? []).map((r) => [_normalizeRoomKey(r.room_name), r]));
   const activeBookingsByRoom = new Map();
-  (bookings ?? []).filter((b) => b.is_active === true).forEach((b) => activeBookingsByRoom.set(b.room_name, b));
+  // Same normalization as roomsByName above: bookings.room_name is
+  // written ALL CAPS by the gateway (sanitizeBookingFields), while
+  // def.room_name below is ROOM_DEFINITIONS' Title Case. Without this,
+  // the lookup a few lines down NEVER matches, so activeBooking is
+  // always null and every occupied room renders as available on any
+  // device other than the one that made the booking (that device only
+  // looks "correct" because the local-cache fallback below happens to
+  // mask the broken lookup with its own optimistic state).
+  (bookings ?? [])
+    .filter((b) => b.is_active === true)
+    .forEach((b) => activeBookingsByRoom.set(_normalizeRoomKey(b.room_name), b));
 
   // Group shop line items by the booking_id they belong to, so each
   // occupied room can look up its own items in O(1) instead of
@@ -395,7 +405,7 @@ function _mergeData(rooms, bookings, shopLineItems) {
 
   return ROOM_DEFINITIONS.map((def) => {
     const liveRoom = roomsByName.get(_normalizeRoomKey(def.room_name));
-    const activeBooking = activeBookingsByRoom.get(def.room_name) ?? null;
+    const activeBooking = activeBookingsByRoom.get(_normalizeRoomKey(def.room_name)) ?? null;
     const local = currentState.find((r) => r.room_name === def.room_name);
 
     if (local && local.status === "occupied" && !activeBooking && !(liveRoom && liveRoom.status === "occupied")) {
@@ -442,7 +452,7 @@ function _mergeData(rooms, bookings, shopLineItems) {
       activeBooking: null,
       // category_id lives on the rooms table (added for the website
       // reservations feature) and isn't part of ROOM_DEFINITIONS, so
-      // it has to come from the live Airtable record explicitly here —
+      // it has to come from the live D1 room record explicitly here —
       // ReservationsTab's per-category room picker depends on it.
       category_id: liveRoom?.category_id ?? null,
       ...def
@@ -482,7 +492,7 @@ async function _loadRooms() {
 }
 
 // ─────────────────────────────────────────────────────
-// Expense data loading (UPDATED FOR AIRTABLE)
+// Expense data loading
 // ─────────────────────────────────────────────────────
 
 async function _loadExpenses() {
@@ -494,7 +504,7 @@ async function _loadExpenses() {
     setExpenses(result.expenses);
   } else {
     setExpenses([]);
-    showToast("error", "Expenses sync failed", result.error ?? "Could not reach Airtable.");
+    showToast("error", "Expenses sync failed", result.error ?? "Could not reach the server.");
   }
 }
 
@@ -787,7 +797,7 @@ function _wireEditExpenseModal() {
     if (saveBtn) saveBtn.disabled = true;
 
     try {
-      // CHANGED: Swapped out old post payload with Airtable patch engine
+      // CHANGED: Swapped out old post payload with the D1 patch engine
       const result = await patchExpenseAPI(expenseId, {
         amount,
         category,
@@ -828,7 +838,7 @@ async function _handleDeleteExpense(expenseId) {
   showToast("info", "Deleting expense…", _ksh(expense.amount));
 
   try {
-    // CHANGED: Connected delete flow straight to Airtable clean record removal
+    // CHANGED: Connected delete flow straight to D1 clean record removal
     const result = await deleteExpenseAPI(expenseId);
 
     if (result.ok) {
@@ -878,7 +888,7 @@ function _onCardClick(room) {
     showToast(
       "info",
       "This room needs attention",
-      room.error ?? "The last write to Airtable failed. Refresh, then retry."
+      room.error ?? "The last write to the server failed. Refresh, then retry."
     );
   }
 }
@@ -925,7 +935,7 @@ async function _handleCheckIn(groupFormData) {
       shop_total: 0,
       shop_items: [],
       // Top-level, so getRelatedRooms() can match siblings immediately —
-      // same room comes back with this field from Airtable via
+      // same room comes back with this field from the database via
       // _mergeData() on the next poll, so it's consistent before/after sync.
       Client_Booking_Ref: formData.Client_Booking_Ref,
       activeBooking: {
@@ -954,11 +964,14 @@ async function _handleCheckIn(groupFormData) {
   const guestLabel = roomsData[0]?.guest_name ?? "guest";
   showToast("info", isGroup ? `Saving check-in for ${roomsData.length} rooms…` : "Saving check-in…", guestLabel);
 
-  // Write the whole group via bulkCheckIn — chunked into Airtable's
-  // 10-record batch limit and sent as sequential batches, instead of
-  // firing N individual checkIn() calls in parallel (which is exactly
-  // the per-base rate-limit risk bulkCheckIn's own header comment warns
-  // about under real front-desk load).
+  // Write the whole group via bulkCheckIn — the gateway runs this as a
+  // single atomic D1 batch (all rooms succeed or none do), not chunked
+  // sequential requests the way the old Airtable-backed version worked.
+  // Still one request instead of firing N individual checkIn() calls.
+  // NOTE: because it's now all-or-nothing, `result.failedBatches` below
+  // can never actually be populated — the ok:false branch above already
+  // covers every failure case. That handling is kept as a harmless no-op
+  // rather than ripped out, since removing it is a separate cleanup.
   const recordsArray = roomsData.map((formData) => ({
     room_name: formData.room_name,
     guest_name: formData.guest_name,
@@ -986,7 +999,7 @@ async function _handleCheckIn(groupFormData) {
   const result = await bulkCheckIn(recordsArray);
 
   if (!result.ok) {
-    // Total failure — nothing in the group landed on Airtable's side.
+    // Total failure — nothing in the group landed in the database.
     // Flag every room 'error' rather than quietly reverting to
     // 'available', since the front desk needs to see and retry these.
     setSyncStatus("error");
@@ -1008,7 +1021,7 @@ async function _handleCheckIn(groupFormData) {
   const succeededFormData = roomsData.filter((fd) => !failedRoomNames.has(fd.room_name));
   const failedFormData = roomsData.filter((fd) => failedRoomNames.has(fd.room_name));
 
-  // Write the real Airtable booking_id into each successful room, one emit.
+  // Write the real booking_id into each successful room, one emit.
   const successPatches = {};
   succeededFormData.forEach((formData, idx) => {
     const bookingId = result.booking_ids?.[idx];
@@ -1057,7 +1070,7 @@ async function _handleCheckIn(groupFormData) {
 
 /**
  * Handles the "Update" (Extend Stay) action from CheckOutModal.js.
- * PATCHes the new nights value straight to Airtable, then patches
+ * PATCHes the new nights value straight to the database, then patches
  * local state so the grid/receipt/other open views stay consistent.
  *
  * @param {Object} room
@@ -1236,11 +1249,12 @@ async function _handleCheckOut(payload) {
   // that mapping doesn't change while these awaits are in flight.
   const stateRooms = getState().rooms;
 
-  // Mirrors bulkCheckIn's batching: chunked into Airtable's 10-record
-  // limit, sent as sequential batches, so a group checkout gets the same
-  // partial-failure visibility check-in has instead of the previous
-  // sequential-PATCH-loop bailing on the first failure and leaving
+  // Mirrors bulkCheckIn: the gateway runs this as a single atomic D1
+  // batch (all rooms close or none do), replacing the old sequential-
+  // PATCH-loop that used to bail on the first failure and leave
   // already-closed rooms stuck showing 'occupied' in local state.
+  // Same note as bulkCheckIn above: `result.failedBatches` below can
+  // never actually be populated now that this is all-or-nothing.
   const result = await bulkCheckOut(bookingIds, {
     payment_method,
     payment_reference,
@@ -1248,9 +1262,9 @@ async function _handleCheckOut(payload) {
   });
 
   if (!result.ok) {
-    // Total failure — nothing in the group actually closed on Airtable's
-    // side. Flag every room 'error' so the front desk sees it needs a
-    // retry, instead of leaving them looking like a normal occupied room.
+    // Total failure — nothing in the group actually closed in the
+    // database. Flag every room 'error' so the front desk sees it needs
+    // a retry, instead of leaving them looking like a normal occupied room.
     setSyncStatus("error");
     const roomNames = bookingIds.map((id) => stateRooms.find((r) => r.booking_id === id)?.room_name).filter(Boolean);
     markRoomsError(roomNames, result.error ?? "Checkout failed to save.");
@@ -1291,8 +1305,8 @@ async function _handleCheckOut(payload) {
   if (Object.keys(successPatches).length > 0) bulkPatchRooms(successPatches);
 
   if (failedRoomNames.length > 0) {
-    // The PATCH for these didn't confirm — they're still occupied on
-    // Airtable's side, so 'error' (not 'available') is the honest state.
+    // The write for these didn't confirm — they're still occupied in
+    // the database, so 'error' (not 'available') is the honest state.
     markRoomsError(failedRoomNames, "Checkout failed to save — please retry.");
   }
 
@@ -1702,10 +1716,10 @@ async function _handleAssignReservationRoom(reservation, lineItem, room) {
  *
  * Note: there is no line-item-level "confirm" — only "cancelled" and
  * "checked_in" are valid statuses for the reservation_line_items
- * table in Airtable, so confirmation only ever happens at the
+ * table in the database, so confirmation only ever happens at the
  * reservation level (_handleConfirmReservation below). A line-item
  * Confirm button existed briefly but was removed after it threw 422s
- * trying to write a "confirmed" value Airtable doesn't accept there.
+ * trying to write a "confirmed" value the schema doesn't accept there.
  */
 
 async function _handleCancelLineItem(lineItem) {
