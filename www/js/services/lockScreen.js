@@ -7,13 +7,21 @@
  *  - 15 minutes with NO touch on the app AT ALL — including the app
  *    being backgrounded/switched away from without exiting — locks
  *    the screen. Any touch/click/keydown resets the clock while the
- *    app is foregrounded and unlocked.
+ *    app is foregrounded and unlocked. This applies on both native
+ *    and in a plain browser tab.
  *  - While locked, and while the session is still under the 1-hour
  *    absolute ceiling (auth.js: SESSION_ABSOLUTE_MS), biometric
  *    success is treated as fully equivalent to a correct PIN for the
  *    narrow purpose of re-arming the already-open app — it's a LOCAL
  *    re-arm of the still-valid token already in localStorage, no
  *    network call, nothing sent to the Worker.
+ *  - Biometrics are a NATIVE-ONLY capability. In a plain browser tab
+ *    there is no OS biometric prompt to offer at all, so the lock
+ *    screen there skips the availability check and its messaging
+ *    entirely — it just shows the "Use PIN instead" fallback with no
+ *    biometric-related copy. On native, behavior is unchanged: check
+ *    availability, and only show "Biometrics aren't set up on this
+ *    device" if *this* device genuinely has none enrolled.
  *  - If biometrics aren't available/enrolled on the device, or the
  *    person taps "Use PIN instead", or the 1-hour ceiling has been
  *    crossed — fall through to a full PIN login. That reuses the
@@ -151,6 +159,15 @@ async function _lock() {
     // token this old. Skip straight to PIN-only.
     _unlockBtn.classList.add("hidden");
     _showStatus("Your session has expired. Please log in again.");
+    return;
+  }
+
+  // Biometrics are a native-only capability. In a plain browser tab
+  // there is no OS biometric prompt to offer at all — skip the
+  // availability check and its "not enrolled" messaging entirely, and
+  // just present the PIN fallback with no biometric-related copy.
+  if (!Capacitor.isNativePlatform()) {
+    _unlockBtn.classList.add("hidden");
     return;
   }
 

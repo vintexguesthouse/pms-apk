@@ -36,6 +36,13 @@
  */
 
 import { printReceiptPhysical, downloadReceiptPdf } from "./Receipt.js";
+
+// Same reasoning as services/lockScreen.js: www/ is served unbundled,
+// so bare specifiers like "@capacitor/core" can't resolve in the
+// browser. Read straight off the window.Capacitor global instead.
+// Used only to decide whether the Print button (front-desk PC only —
+// there's no printer to send to from a phone/tablet) should render.
+const Capacitor = window.Capacitor ?? { isNativePlatform: () => false };
 import {
   renderPaymentFields,
   validatePayment,
@@ -352,12 +359,13 @@ function _buildCheckOutPanel() {
 
     <div class="px-5 py-4 border-t border-gray-800 space-y-2">
       <div id="co-validation-msg" class="text-xs text-red-400 hidden mb-1"></div>
-      <div class="grid grid-cols-2 gap-2">
+      <div class="grid ${Capacitor.isNativePlatform() ? "grid-cols-1" : "grid-cols-2"} gap-2">
+        ${Capacitor.isNativePlatform() ? "" : `
         <button id="btn-print-receipt" type="button"
           title="Send to the thermal receipt printer (front desk PC)"
           class="py-2.5 rounded-xl font-semibold text-sm bg-gray-700 hover:bg-gray-600 text-white transition-colors">
           🖨️ Print Receipt${isGroup ? "s" : ""}
-        </button>
+        </button>`}
         <button id="btn-download-receipt" type="button"
           title="Download a PDF copy (works on any phone or computer)"
           class="py-2.5 rounded-xl font-semibold text-sm bg-gray-700 hover:bg-gray-600 text-white transition-colors">

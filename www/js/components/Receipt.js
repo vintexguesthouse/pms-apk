@@ -29,6 +29,17 @@
  *                                   front-desk thermal printer)
  */
 
+import { showToast } from '../services/toast.js';
+
+// Same reasoning as services/lockScreen.js and services/updateCheck.js:
+// www/ is served unbundled, so bare specifiers like "@capacitor/core"
+// can't resolve in the browser. Read the plugin proxies straight off
+// the window.Capacitor global the native runtime injects instead.
+const Capacitor = window.Capacitor ?? { isNativePlatform: () => false, Plugins: {} };
+const Filesystem = Capacitor.Plugins?.Filesystem;
+const FileOpener = Capacitor.Plugins?.FileOpener;
+const Directory = { Cache: 'CACHE' };
+
 // ─────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────
@@ -348,6 +359,7 @@ function _buildReceiptPdf(rooms) {
 function _jsPdfReady() {
   if (window.jspdf && typeof window.jspdf.jsPDF === 'function') return true;
   console.error('[Receipt] jsPDF failed to load — check your internet connection and try again.');
+  showToast('error', "Couldn't build receipt", 'PDF library failed to load — check your connection and try again.');
   return false;
 }
 
@@ -358,12 +370,52 @@ function _jsPdfReady() {
 /**
  * Builds a receipt PDF for the given room(s) and downloads it as a
  * file (e.g. to hand a digital copy to a guest, or keep for records).
+ *
+ * On the web this is doc.save() — a real browser download. Inside the
+ * APK's Android System WebView, the <a download> click doc.save() does
+ * under the hood has no download handler wired up, so it's a silent
+ * no-op there. On native, this instead writes the PDF via Capacitor's
+ * Filesystem plugin and hands it to the OS via FileOpener — same
+ * pattern already proven in services/updateCheck.js for APK downloads.
+ *
  * @param {Object|Array} rooms - The room/booking data for the receipt.
  */
-export function downloadReceiptPdf(rooms) {
-  if (!_jsPdfReady()) return;
+export async function downloadReceiptPdf(rooms) {
+  if (!_jsPdfReady()) return false;
   const { doc, receiptNo } = _buildReceiptPdf(rooms);
-  doc.save(`receipt_${receiptNo}.pdf`);
+  const filename = `receipt_${receiptNo}.pdf`;
+
+  if (!Capacitor.isNativePlatform()) {
+    try {
+      doc.save(filename);
+      return true;
+    } catch (err) {
+      console.error('[Receipt] doc.save() failed in browser:', err);
+      showToast('error', 'Download failed', "Couldn't download the receipt. Please try again.");
+      return false;
+    }
+  }
+
+  if (!Filesystem || !FileOpener) {
+    console.error('[Receipt] Filesystem/FileOpener plugin not available on this build.');
+    showToast('error', "Couldn't open the file", 'Required plugin is missing from this build.');
+    return false;
+  }
+
+  try {
+    const base64 = doc.output('datauristring').split(',')[1];
+    const { uri } = await Filesystem.writeFile({
+      path: filename,
+      data: base64,
+      directory: Directory.Cache
+    });
+    await FileOpener.open({ filePath: uri, contentType: 'application/pdf' });
+    return true;
+  } catch (err) {
+    console.error('[Receipt] Failed to save/open the receipt PDF on device.', err);
+    showToast('error', "Couldn't save the receipt", 'Check storage permissions and try again.');
+    return false;
+  }
 }
 
 /**
@@ -381,8 +433,18 @@ export function downloadReceiptPdf(rooms) {
  *
  * @param {Object|Array} rooms - The room/booking data for the receipt.
  */
-export function printReceiptPhysical(rooms) {
+export async function printReceiptPhysical(rooms) {
   if (!_jsPdfReady()) return;
+
+  // There's no OS print dialog inside the Android WebView — window.print()
+  // is a silent no-op there (see file header). CheckOutModal.js already
+  // hides the button that calls this on native, but guard here too as a
+  // defensive fallback for any other/future call site: on native, just
+  // do what "Download PDF" does instead of trying to print at all.
+  if (Capacitor.isNativePlatform()) {
+    await downloadReceiptPdf(rooms);
+    return;
+  }
 
   const { doc } = _buildReceiptPdf(rooms);
   const blobUrl = doc.output('bloburl');
@@ -407,6 +469,7 @@ export function printReceiptPhysical(rooms) {
       iframe.contentWindow.print();
     } catch (err) {
       console.error('[Receipt] Failed to open the print dialog for the receipt.', err);
+      showToast('error', "Couldn't print", 'The print dialog failed to open. Try Download PDF instead.');
     }
     // There's no reliable 'afterprint' signal from inside a PDF-viewer
     // iframe across browsers, so clean up on a generous delay instead

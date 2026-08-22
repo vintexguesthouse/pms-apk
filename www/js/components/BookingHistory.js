@@ -30,6 +30,20 @@
  *   #history-container and wires up search + delete.
  */
 
+import { showToast } from "../services/toast.js";
+
+// Same reasoning as services/lockScreen.js, services/updateCheck.js, and
+// components/Receipt.js: www/ is served unbundled, so bare specifiers like
+// "@capacitor/core" can't resolve in the browser. Read the plugin proxies
+// straight off the window.Capacitor global the native runtime injects
+// instead. This file never had this shim before — its PDF export always
+// went straight to doc.save(), which is a silent no-op inside the native
+// Android WebView (same root cause as the checkout receipt bug).
+const Capacitor = window.Capacitor ?? { isNativePlatform: () => false, Plugins: {} };
+const Filesystem = Capacitor.Plugins?.Filesystem;
+const FileOpener = Capacitor.Plugins?.FileOpener;
+const Directory = { Cache: "CACHE" };
+
 // ─────────────────────────────────────────────────────
 // Module-level state (same pattern as ReservationsTab.js's _lastArgs)
 // ─────────────────────────────────────────────────────
@@ -299,19 +313,55 @@ function _flashDownloadBtnEmpty(btn) {
  * and downloads it. Returns false (without doing anything) if there's
  * nothing to export, or if jsPDF failed to load.
  */
-function _exportVisibleRows() {
+async function _exportVisibleRows() {
   const query = _searchQuery.trim().toLowerCase();
   const visibleRows = _lastBookings.filter((r) => _matchesFilters(r, query, _dateFrom, _dateTo));
   if (visibleRows.length === 0) return false;
 
   if (!window.jspdf || typeof window.jspdf.jsPDF !== "function") {
     console.error("[BookingHistory] jsPDF failed to load — check your internet connection and try again.");
+    showToast("error", "Couldn't build report", "PDF library failed to load — check your connection and try again.");
     return false;
   }
 
   const doc = _buildHistoryPdf(visibleRows, { query, dateFrom: _dateFrom, dateTo: _dateTo });
-  doc.save(_buildExportFilename());
-  return true;
+  const filename = _buildExportFilename();
+
+  // Was: bare doc.save(filename) unconditionally, browser-only style.
+  // That's a silent no-op inside the native Android WebView — same root
+  // cause as the checkout receipt bug, same fix: native writes the PDF
+  // via Filesystem and hands it to the OS via FileOpener instead.
+  if (!Capacitor.isNativePlatform()) {
+    try {
+      doc.save(filename);
+      return true;
+    } catch (err) {
+      console.error("[BookingHistory] doc.save() failed in browser:", err);
+      showToast("error", "Download failed", "Couldn't download the report. Please try again.");
+      return false;
+    }
+  }
+
+  if (!Filesystem || !FileOpener) {
+    console.error("[BookingHistory] Filesystem/FileOpener plugin not available on this build.");
+    showToast("error", "Couldn't open the file", "Required plugin is missing from this build.");
+    return false;
+  }
+
+  try {
+    const base64 = doc.output("datauristring").split(",")[1];
+    const { uri } = await Filesystem.writeFile({
+      path: filename,
+      data: base64,
+      directory: Directory.Cache
+    });
+    await FileOpener.open({ filePath: uri, contentType: "application/pdf" });
+    return true;
+  } catch (err) {
+    console.error("[BookingHistory] Failed to save/open the report PDF on device.", err);
+    showToast("error", "Couldn't save the report", "Check storage permissions and try again.");
+    return false;
+  }
 }
 
 // ─────────────────────────────────────────────────────
@@ -504,8 +554,8 @@ function _render() {
     });
 
     const downloadBtn = container.querySelector("#history-download-btn");
-    downloadBtn.addEventListener("click", () => {
-      const exported = _exportVisibleRows();
+    downloadBtn.addEventListener("click", async () => {
+      const exported = await _exportVisibleRows();
       if (!exported) _flashDownloadBtnEmpty(downloadBtn);
     });
 

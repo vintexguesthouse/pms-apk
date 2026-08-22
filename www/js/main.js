@@ -68,6 +68,7 @@ import {
 
 import { initAuthGate, getActiveUser, getActiveRole, clearSession } from "./services/auth.js";
 import { initLockScreen } from "./services/lockScreen.js";
+import { showToast } from "./services/toast.js";
 
 import { renderRoomsGrid } from "./components/RoomCard.js";
 import { renderReservationsTab } from "./components/ReservationsTab.js";
@@ -103,34 +104,6 @@ const ROOM_DEFINITIONS = [
   { room_name: "Self-Control", room_type: "Bed and Breakfast", base_rate: 2500 },
   { room_name: "Peace", room_type: "Bed and Breakfast", base_rate: 4000 }
 ];
-
-// ─────────────────────────────────────────────────────
-// Toast helper
-// ─────────────────────────────────────────────────────
-
-let _toastTimer = null;
-
-function showToast(type, title, body = "") {
-  const toast = document.getElementById("toast");
-  const iconEl = document.getElementById("toast-icon");
-  const titleEl = document.getElementById("toast-title");
-  const bodyEl = document.getElementById("toast-body");
-  if (!toast) return;
-
-  const icons = { success: "✅", error: "❌", info: "ℹ️" };
-  iconEl.textContent = icons[type] ?? "ℹ️";
-  titleEl.textContent = title;
-  bodyEl.textContent = body;
-
-  toast.classList.remove("translate-y-10", "opacity-0", "pointer-events-none");
-  toast.classList.add("translate-y-0", "opacity-100");
-
-  if (_toastTimer) clearTimeout(_toastTimer);
-  _toastTimer = setTimeout(() => {
-    toast.classList.add("translate-y-10", "opacity-0", "pointer-events-none");
-    toast.classList.remove("translate-y-0", "opacity-100");
-  }, 3500);
-}
 
 // ─────────────────────────────────────────────────────
 // Utility formatters
