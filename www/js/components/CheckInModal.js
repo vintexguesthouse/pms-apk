@@ -42,9 +42,11 @@ import {
 // Rate range constants
 // ─────────────────────────────────────────────────────
 
-const RATE_MIN = 1000;
-const RATE_MAX = 6500;
-const RATE_STEP = 100;
+// Exported so PastStayModal.js can build the same "Charged Rate" dropdown
+// for backfilled stays without a second hardcoded ladder drifting out of sync.
+export const RATE_MIN = 1000;
+export const RATE_MAX = 6500;
+export const RATE_STEP = 100;
 
 // ─────────────────────────────────────────────────────
 // Module-level state

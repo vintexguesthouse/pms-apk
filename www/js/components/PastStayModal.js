@@ -29,7 +29,7 @@
  */
 
 import { logPastStay } from "../services/api.js";
-import { validateBackdateDate, generateClientBookingRef } from "./CheckInModal.js";
+import { validateBackdateDate, generateClientBookingRef, RATE_MIN, RATE_MAX, RATE_STEP } from "./CheckInModal.js";
 import {
   renderPaymentFields,
   validatePayment,
@@ -48,6 +48,7 @@ import {
 
 let _roomDefinitions = [];          // Object[] — the full 14-room catalog, from main.js
 let _selectedRoomNames = new Set(); // room_name -> selected for this past stay
+let _rateSelections = {};           // room_name -> currently chosen charged_rate (number), same shape as CheckInModal's
 let _createdBy = "unknown";
 let _onSuccessCallback = null;
 
@@ -81,6 +82,17 @@ function _selectedRooms() {
   return _roomDefinitions.filter((r) => _selectedRoomNames.has(r.room_name));
 }
 
+/** Same rate ladder as CheckInModal's Charged Rate dropdown (RATE_MIN..RATE_MAX step RATE_STEP). */
+function _buildRateOptions(baseRate, selectedRate) {
+  const target = selectedRate ?? baseRate;
+  let html = "";
+  for (let r = RATE_MIN; r <= RATE_MAX; r += RATE_STEP) {
+    const selected = r === target ? "selected" : "";
+    html += `<option value="${r}" ${selected}>${_ksh(r)}</option>`;
+  }
+  return html;
+}
+
 // ─────────────────────────────────────────────────────
 // HTML builders
 // ─────────────────────────────────────────────────────
@@ -106,6 +118,54 @@ function _buildRoomChecklist() {
         .join("")}
     </div>
   `;
+}
+
+/**
+ * Renders one rate row per currently-selected room. Lives in its own
+ * section (rather than inline in the checklist, like CheckInModal does
+ * for its already-narrowed active group) because the checklist here
+ * spans all 14 rooms and only a few are usually picked.
+ */
+function _buildRatesSection() {
+  const rooms = _selectedRooms();
+  if (rooms.length === 0) {
+    return `<p class="text-xs text-gray-600 italic">Select rooms above to set their rates.</p>`;
+  }
+
+  return rooms
+    .map((room) => {
+      const id = _safeId(room.room_name);
+      const chargedRate = _rateSelections[room.room_name] ?? room.base_rate;
+      const variance = chargedRate - Number(room.base_rate);
+
+      return `
+        <div class="rounded-lg bg-gray-800/60 border border-gray-700 px-3 py-2.5" data-room="${room.room_name}">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="text-xs font-semibold text-gray-400 truncate" for="ps-rate-${id}">${room.room_name}</label>
+            <span class="text-[11px] text-gray-500 whitespace-nowrap ml-2">Base: ${_ksh(room.base_rate)}</span>
+          </div>
+          <select id="ps-rate-${id}" data-room="${room.room_name}"
+            class="ps-rate-select w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white
+                   focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-colors">
+            ${_buildRateOptions(room.base_rate, chargedRate)}
+          </select>
+          <div class="ps-variance-container mt-1.5 ${variance === 0 ? "hidden" : ""}" data-room="${room.room_name}">
+            <p class="text-[10px] uppercase font-bold tracking-wider text-gray-500">
+              Variance: <span class="ps-variance-value ${variance > 0 ? "text-emerald-400" : "text-red-400"}">
+                ${variance > 0 ? "+" : ""}${variance} KSH
+              </span>
+            </p>
+          </div>
+        </div>
+      `;
+    })
+    .join('<div class="h-2"></div>');
+}
+
+/** Re-renders #ps-rates-section from current selection/rate state. Called on every checklist toggle. */
+function _refreshRatesSection() {
+  const ratesSection = document.getElementById("ps-rates-section");
+  if (ratesSection) ratesSection.innerHTML = _buildRatesSection();
 }
 
 function _buildForm() {
@@ -135,6 +195,11 @@ function _buildForm() {
       <div>
         <p class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">Rooms</p>
         ${_buildRoomChecklist()}
+      </div>
+
+      <div>
+        <p class="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2">Rates</p>
+        <div id="ps-rates-section" class="space-y-2">${_buildRatesSection()}</div>
       </div>
 
       <div class="grid grid-cols-2 gap-3">
@@ -276,8 +341,14 @@ function _wireForm() {
     if (!checkbox) return;
 
     const roomName = checkbox.dataset.room;
-    if (checkbox.checked) _selectedRoomNames.add(roomName);
-    else _selectedRoomNames.delete(roomName);
+    if (checkbox.checked) {
+      _selectedRoomNames.add(roomName);
+    } else {
+      _selectedRoomNames.delete(roomName);
+      // Drop any custom rate so re-checking this room later starts back at base_rate,
+      // same "clean slate on removal" behavior as CheckInModal's remove-room button.
+      delete _rateSelections[roomName];
+    }
 
     const label = checkbox.closest("label");
     if (label) {
@@ -287,6 +358,39 @@ function _wireForm() {
       label.classList.toggle("bg-gray-800", !checkbox.checked);
       label.classList.toggle("border-gray-700", !checkbox.checked);
       label.classList.toggle("text-gray-300", !checkbox.checked);
+    }
+
+    _refreshRatesSection();
+    _touched = true;
+    _resetSubmitConfirm();
+    _refreshValidationUI();
+  });
+
+  // Rate selects — delegated onto the rates section so it stays wired
+  // across every _refreshRatesSection() re-render. Mirrors CheckInModal's
+  // _onRoomsListChange rate-select + variance-display handling.
+  const ratesSection = document.getElementById("ps-rates-section");
+  ratesSection?.addEventListener("change", (e) => {
+    const rateSelect = e.target.closest(".ps-rate-select");
+    if (!rateSelect) return;
+
+    const roomName = rateSelect.dataset.room;
+    const room = _selectedRooms().find((r) => r.room_name === roomName);
+    if (!room) return;
+
+    const selectedRate = Number(rateSelect.value);
+    _rateSelections[roomName] = selectedRate;
+
+    const varianceContainer = ratesSection.querySelector(`.ps-variance-container[data-room="${roomName}"]`);
+    const varianceValue = varianceContainer?.querySelector(".ps-variance-value");
+    const variance = selectedRate - Number(room.base_rate);
+
+    if (variance !== 0) {
+      varianceContainer.classList.remove("hidden");
+      varianceValue.textContent = `${variance > 0 ? "+" : ""}${variance} KSH`;
+      varianceValue.className = `ps-variance-value ${variance > 0 ? "text-emerald-400" : "text-red-400"}`;
+    } else {
+      varianceContainer?.classList.add("hidden");
     }
 
     _touched = true;
@@ -351,10 +455,10 @@ function _wireForm() {
     }
 
     const rooms = _selectedRooms();
-    const preliminary = rooms.map((room) => ({
-      room_name: room.room_name,
-      grand_total: Number(room.base_rate) * nights
-    }));
+    const preliminary = rooms.map((room) => {
+      const chargedRate = Number(_rateSelections[room.room_name] ?? room.base_rate);
+      return { room_name: room.room_name, grand_total: chargedRate * nights };
+    });
     const groupGrandTotal = preliminary.reduce((sum, r) => sum + r.grand_total, 0);
 
     const statusCheck = validatePaymentStatus(paymentStatus, depositAmount, groupGrandTotal);
@@ -374,7 +478,8 @@ function _wireForm() {
 
     const recordsArray = rooms.map((room) => {
       const baseRate = Number(room.base_rate);
-      const grandTotal = baseRate * nights;
+      const chargedRate = Number(_rateSelections[room.room_name] ?? baseRate);
+      const grandTotal = chargedRate * nights;
       const amountPaid =
         paymentStatus === "paid"
           ? grandTotal
@@ -389,7 +494,7 @@ function _wireForm() {
         check_in: checkInDateStr,
         room_type: room.room_type,
         base_rate: baseRate,
-        charged_rate: baseRate,
+        charged_rate: chargedRate,
         payment_status: paymentStatus,
         payment_method: paymentMethod,
         payment_reference: reference || null,
@@ -447,6 +552,7 @@ export function openModal(roomDefinitions, { createdBy, onSuccess } = {}) {
 
   _roomDefinitions = roomDefinitions;
   _selectedRoomNames = new Set();
+  _rateSelections = {};
   _createdBy = createdBy ?? "unknown";
   _onSuccessCallback = typeof onSuccess === "function" ? onSuccess : null;
   _pendingSubmitConfirm = false;
@@ -491,6 +597,7 @@ export function closeModal() {
 
   _roomDefinitions = [];
   _selectedRoomNames = new Set();
+  _rateSelections = {};
   _createdBy = "unknown";
   _onSuccessCallback = null;
   _pendingSubmitConfirm = false;
