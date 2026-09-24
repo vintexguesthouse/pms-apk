@@ -898,7 +898,15 @@ async function _handleCheckIn(groupFormData) {
   // when "This check-in actually happened earlier" is on. Either way
   // the room is occupied *now*, so live room state below still flips
   // to occupied immediately regardless of which date this resolves to.
-  const checkInTimestamp = checkInDate ? new Date(`${checkInDate}T00:00:00`).toISOString() : new Date().toISOString();
+  //
+  // Kept as a plain "YYYY-MM-DD" string — check_in is a date-only field
+  // everywhere downstream (state.js's _dateOnly(), Receipt.js, this
+  // file's own _fmtDate(), CheckInModal's validateBackdateDate/_todayISO,
+  // PastStayModal). Routing it through `new Date(...).toISOString()`
+  // used to be the bug: local midnight converted to UTC lands on the
+  // PREVIOUS calendar day at UTC+3, so every check-in saved through
+  // this flow was silently a day behind once synced from the server.
+  const checkInDateStr = checkInDate || _todayISO();
 
   setSyncStatus("saving");
 
@@ -919,7 +927,7 @@ async function _handleCheckIn(groupFormData) {
       amount_paid: amountPaid,
       payment_method,
       payment_reference,
-      check_in: checkInTimestamp,
+      check_in: checkInDateStr,
       shop_total: 0,
       shop_items: [],
       // Top-level, so getRelatedRooms() can match siblings immediately —
@@ -936,7 +944,7 @@ async function _handleCheckIn(groupFormData) {
         amount_paid: amountPaid,
         payment_method,
         payment_reference,
-        check_in: checkInTimestamp,
+        check_in: checkInDateStr,
         shop_charge: 0,
         grand_total: formData.grand_total,
         Client_Booking_Ref: formData.Client_Booking_Ref,
@@ -964,7 +972,7 @@ async function _handleCheckIn(groupFormData) {
     room_name: formData.room_name,
     guest_name: formData.guest_name,
     nights: Number(formData.nights),
-    check_in: checkInTimestamp.split("T")[0], // This sends "2026-06-30" instead of the full timestamp
+    check_in: checkInDateStr,
     room_type: formData.room_type,
     base_rate: Number(formData.base_rate),
     charged_rate: Number(formData.charged_rate),
