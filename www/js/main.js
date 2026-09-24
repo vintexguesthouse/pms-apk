@@ -122,6 +122,21 @@ function _fmtDate(iso) {
   });
 }
 
+/**
+ * Today as a local YYYY-MM-DD string. Deliberately NOT built via
+ * `.toISOString()` — that converts to UTC first, and at UTC+3 (Kenya,
+ * no DST) that silently lands on the previous day for part of the
+ * day (or always, if the Date was first zeroed to local midnight).
+ * See CheckInModal.js's _todayISO for the full explanation.
+ */
+function _todayISO() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 // ─────────────────────────────────────────────────────
 // Header / stats
 // ─────────────────────────────────────────────────────
@@ -670,7 +685,7 @@ function _wireExpensesForm() {
         amount: Number(amount),
         category: category,
         description: description,
-        date: new Date().toISOString().split("T")[0],
+        date: _todayISO(),
         // 1. Auto-identify the user
         created_by: getActiveUser(),
         // 2. Add a temp ID for immediate UI feedback
@@ -1620,7 +1635,7 @@ async function _handleAssignReservationRoom(reservation, lineItem, room) {
     room_name: room.room_name,
     guest_name: reservation.guest_name,
     nights,
-    check_in: checkInDate.toISOString().split("T")[0],
+    check_in: _todayISO(),
     room_type: room.room_type,
     base_rate: Number(room.base_rate),
     // Room rates stay staff-adjustable at check-in time, independent
@@ -1778,6 +1793,6 @@ function _prepareExpensePayload(amount, category, description) {
     amount: Number(amount),
     category: category,
     description: description,
-    date: new Date().toISOString().split("T")[0] // Standardized format
+    date: _todayISO(), // Standardized format
   };
 }

@@ -177,9 +177,16 @@ function _activeGroupNames() {
 
 /** Today as an ISO date string — a fresh check-in's occupancy starts today. */
 function _todayISO() {
+  // NOTE: was `d.setHours(0,0,0,0); return d.toISOString().slice(0,10)` —
+  // toISOString() always converts to UTC first. At UTC+3 (Kenya, no DST),
+  // local midnight is 21:00 the PREVIOUS day in UTC, so that always
+  // returned yesterday's date, unconditionally, on every check-in.
+  // Building the string from local getters avoids the UTC conversion.
   const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.toISOString().slice(0, 10);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 // ─────────────────────────────────────────────────────
